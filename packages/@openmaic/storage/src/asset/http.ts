@@ -244,6 +244,12 @@ export class HttpAssetStore implements StorageProvider {
   private readonly inFlight = new Map<AssetRef, Promise<string | null>>();
   private readonly generations = new Map<AssetRef, number>();
   private readonly probeTimeoutMs: number;
+  // Serializes asset writes. Concurrent `put`s whose bytes share a content
+  // hash all upsert the same `asset_blobs` row server-side; each transaction
+  // holds that row's lock across the coordinated byte write, so a burst of
+  // parallel uploads queues on the lock and can starve the small connection
+  // pool. A single-client write chain keeps one upload in flight at a time.
+  private writeChain: Promise<unknown> = Promise.resolve();
   private closed = false;
 
   constructor(options: HttpAssetStoreOptions) {
@@ -429,6 +435,17 @@ export class HttpAssetStore implements StorageProvider {
   }
 
   async put(data: BinaryBlob, meta?: AssetMeta): Promise<AssetRef> {
+    const run = this.writeChain.then(() => this.putNow(data, meta));
+    // Keep the chain alive regardless of one write's outcome so a failed
+    // upload does not wedge every subsequent write behind a rejection.
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async putNow(data: BinaryBlob, meta?: AssetMeta): Promise<AssetRef> {
     const path = '/assets';
     const response = await this.fetchResponse('POST', path, await this.writeForm(data, meta, true));
     if (!response.ok) throw await this.httpError(response);

@@ -290,22 +290,24 @@ export class PgAssetStore implements AssetStore {
         // Inside the transaction, and before anything is written: a check on
         // the pool is already stale when it is acted on.
         await this.assertPutQuota(queryable, principal, bytes.byteLength);
-        await queryable.query(
+        // Insert-or-ignore: unlike `ON CONFLICT DO UPDATE`, `DO NOTHING` does
+        // NOT take the conflicting row's lock when the blob already exists.
+        // Concurrent puts of the same content hash then become no-ops instead
+        // of queueing on a lock that the first transaction holds across the
+        // byte write — the pattern that starved the pool and hung loads.
+        const inserted = await queryable.query(
           `INSERT INTO asset_blobs (content_hash, byte_size, unreferenced_at)
            VALUES ($1, $2, NULL)
-           ON CONFLICT (content_hash) DO UPDATE
-             SET unreferenced_at = NULL,
-                 byte_size = EXCLUDED.byte_size`,
+           ON CONFLICT (content_hash) DO NOTHING
+           RETURNING content_hash`,
           [contentHash, bytes.byteLength],
         );
-        // Bytes are written only after the upsert above has taken the blob
-        // row's lock. Writing before it instead would not be safe: the
-        // collector can hold that lock, delete those bytes, and commit while
-        // this upsert waits, leaving a fresh entry pointing at nothing. The
-        // write is unconditional, so both existence paths still emit the same
-        // sequence. The entry is inserted after it, so no row ever references
-        // bytes that were not stored first.
-        await this.coordinatedWrite(queryable, contentHash, bytes);
+        // Only the transaction that inserted the blob row writes its bytes; a
+        // conflicting put found them already stored. The entry insert below is
+        // unconditional so every put still allocates its own asset id.
+        if (inserted.rows.length > 0) {
+          await this.coordinatedWrite(queryable, contentHash, bytes);
+        }
         await queryable.query(
           `INSERT INTO asset_entries
              (id, principal, content_hash, mime, meta, revision, created_at)
@@ -495,15 +497,18 @@ export class PgAssetStore implements AssetStore {
         const oldEntry = existing.rows[0];
         if (!oldEntry) throw new RegistryAssetNotFound();
 
-        await queryable.query(
+        const inserted = await queryable.query(
           `INSERT INTO asset_blobs (content_hash, byte_size, unreferenced_at)
            VALUES ($1, $2, NULL)
-           ON CONFLICT (content_hash) DO UPDATE
-             SET unreferenced_at = NULL,
-                 byte_size = EXCLUDED.byte_size`,
+           ON CONFLICT (content_hash) DO NOTHING
+           RETURNING content_hash`,
           [contentHash, bytes.byteLength],
         );
-        await this.coordinatedWrite(queryable, contentHash, bytes);
+        // On conflict the bytes are already stored under this hash; only the
+        // inserting transaction writes them (same lock-free rationale as put).
+        if (inserted.rows.length > 0) {
+          await this.coordinatedWrite(queryable, contentHash, bytes);
+        }
 
         let updated;
         if (storedMeta === undefined) {

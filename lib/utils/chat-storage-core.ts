@@ -496,7 +496,11 @@ export function buildChatRecordInit(
     ...(Number.isInteger(actionIndex) && actionIndex !== undefined && actionIndex >= 0
       ? { actionIndex }
       : {}),
-    payload,
+    // Chat UIMessage parts can carry `undefined` members (e.g. a tool input's
+    // optional `dimOpacity`), which the runtime store's plain-JSON validator
+    // rejects. The JSON round-trip drops them, matching the validator's own
+    // "dropped by JSON" semantics.
+    payload: JSON.parse(JSON.stringify(payload)),
   };
 }
 

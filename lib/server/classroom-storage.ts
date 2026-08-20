@@ -29,6 +29,12 @@ export async function writeJsonFileAtomic(filePath: string, data: unknown) {
 }
 
 export function buildRequestOrigin(req: NextRequest): string {
+  // APP_ORIGIN wins: generated classrooms bake this origin into every
+  // `audioUrl`/`mediaUrl`, and remote browsers cannot reach a loopback or
+  // internal origin. When unset, fall back to the forwarded host (reverse
+  // proxy) then the request origin.
+  const canonical = process.env.APP_ORIGIN?.trim();
+  if (canonical) return canonical.replace(/\/+$/, '');
   return req.headers.get('x-forwarded-host')
     ? `${req.headers.get('x-forwarded-proto') || 'http'}://${req.headers.get('x-forwarded-host')}`
     : req.nextUrl.origin;
@@ -53,6 +59,19 @@ export async function readClassroom(id: string): Promise<PersistedClassroomData 
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return null;
+    }
+    throw error;
+  }
+}
+
+export async function deleteClassroom(id: string): Promise<boolean> {
+  const filePath = path.join(CLASSROOMS_DIR, `${id}.json`);
+  try {
+    await fs.unlink(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
     }
     throw error;
   }

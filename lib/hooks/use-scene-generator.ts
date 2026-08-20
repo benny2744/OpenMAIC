@@ -350,7 +350,9 @@ export async function generateAndStoreTTS(
     language,
     provider: {
       id: settings.ttsProviderId,
-      model: ttsProviderConfig?.modelId,
+      ...(ttsProviderConfig?.modelId !== undefined
+        ? { model: ttsProviderConfig.modelId }
+        : {}),
     },
   } as const;
   const assetId = replaceAssetId ?? (await putAsset(blob, assetMeta));

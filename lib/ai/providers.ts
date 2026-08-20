@@ -27,6 +27,7 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
+import { llmFetch } from './llm-fetch';
 import { createAzure } from '@ai-sdk/azure';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
@@ -1873,17 +1874,17 @@ async function fetchCustomOpenAIChat(
 ): Promise<Response> {
   const requestUrl = requestUrlString(input);
   if (!requestUrl.includes('/chat/completions') || !init?.body || typeof init.body !== 'string') {
-    return globalThis.fetch(input, init);
+    return llmFetch(input, init);
   }
 
   let requestBody: Record<string, unknown>;
   try {
     requestBody = JSON.parse(init.body) as Record<string, unknown>;
   } catch {
-    return globalThis.fetch(input, init);
+    return llmFetch(input, init);
   }
 
-  if (requestBody.stream === true) return globalThis.fetch(input, init);
+  if (requestBody.stream === true) return llmFetch(input, init);
 
   const streamOptions =
     requestBody.stream_options &&
@@ -2125,7 +2126,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
               /* leave body as-is */
             }
           }
-          const response = await globalThis.fetch(url, init);
+          const response = await llmFetch(url, init);
 
           // Recover reasoning that @ai-sdk/openai's chat schema drops: rewrite
           // streamed `reasoning_content` deltas into an inline <think> block
@@ -2184,6 +2185,12 @@ export function getModel(config: ModelConfig): ModelWithInfo {
         };
         openaiOptions.fetch = compatFetch as typeof globalThis.fetch;
       }
+
+      // No wrapper installed (native `openai` provider id, or no streaming
+      // compat): pin the AI SDK's calls to the long-timeout dispatcher so
+      // slow thinking-model scene generations outlive undici's default
+      // 300s headersTimeout instead of dying with "Headers Timeout Error".
+      openaiOptions.fetch ??= llmFetch as typeof globalThis.fetch;
 
       const openai = createOpenAI(openaiOptions);
       model =
@@ -2245,7 +2252,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
             }
           }
 
-          return globalThis.fetch(url, init);
+          return llmFetch(url, init);
         }) as typeof globalThis.fetch;
       }
 

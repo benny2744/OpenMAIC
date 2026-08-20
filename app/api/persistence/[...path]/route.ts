@@ -129,7 +129,13 @@ async function createPersistenceHandler(
     return createStorageHttpHandler(runtimeStore, documentStore, {
       authenticate: authenticatePersistenceRequest,
       authorizeMerge: async () => false,
-      authorizeAdmin: async () => false,
+      // The dev-token authenticator grants every caller the same shared
+      // principal (no user isolation), so admin gating only the bulk runtime
+      // deletes would be security theater — the token is already compiled into
+      // the browser bundle. Allow admin for authenticated callers so project
+      // deletion (DELETE /runtime/stages/<id>) works; revisit when real
+      // session auth replaces the dev token.
+      authorizeAdmin: async (principal) => principal !== undefined,
       authorizeDocuments: async () => true,
       validateScene: validateAppScene,
       validateStage: validateAppStage,
@@ -320,7 +326,24 @@ export async function handlePersistenceRequest(
   }
 
   try {
-    const poolFactory = deps.poolFactory ?? ((value) => new Pool({ connectionString: value }));
+    const poolFactory =
+      deps.poolFactory ??
+      ((value) => {
+        const pool = new Pool({ connectionString: value });
+        // Safety net against orphaned transactions: any session left
+        // idle-in-transaction (e.g. a handler aborted mid-transaction) is
+        // terminated by Postgres itself, releasing its row locks instead of
+        // blocking later writes forever. 30s is far above any healthy
+        // transaction's inter-statement gaps.
+        pool.on('connect', (client) => {
+          client
+            .query('SET idle_in_transaction_session_timeout = 30000')
+            .catch((error) =>
+              console.warn('persistence pool: failed to set idle-in-transaction timeout', error),
+            );
+        });
+        return pool;
+      });
     return await runNodeHandler(
       await getPersistenceHandler(connectionString, poolFactory),
       request,

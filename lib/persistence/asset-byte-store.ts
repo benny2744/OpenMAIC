@@ -95,11 +95,39 @@ export function lazyAssetByteStore(
         throw error;
       },
     ));
+
+  type ContentHashParam = Parameters<AssetByteStore['write']>[0];
+  type MaybeTransactional = AssetByteStore & {
+    writeWith?: (q: Queryable, h: ContentHashParam, b: Uint8Array) => Promise<void>;
+    readWith?: (q: Queryable, h: ContentHashParam) => Promise<Uint8Array | null>;
+  };
+
+  // Transactional pass-throughs. Without them the registry's coordinated byte
+  // write escapes the put transaction onto a SECOND pooled connection, whose
+  // same-hash upsert blocks on the transaction's own uncommitted blob row —
+  // a self-deadlock Postgres cannot detect (the first session is idle waiting
+  // on the client, not on a lock), which hung every asset upload and starved
+  // the pool. Delegating writeWith/readWith keeps the byte I/O pinned to the
+  // transaction's connection. The S3 layer has no row locks, so falling back
+  // to its non-transactional write/read is safe.
   const direct = {
     write: async (hash, bytes) => (await resolve()).write(hash, bytes),
     read: async (hash) => (await resolve()).read(hash),
     delete: async (hash) => (await resolve()).delete(hash),
-  } satisfies AssetByteStore;
+    writeWith: async (q: Queryable, hash: ContentHashParam, bytes: Uint8Array) => {
+      const store = (await resolve()) as MaybeTransactional;
+      if (typeof store.writeWith === 'function') return store.writeWith(q, hash, bytes);
+      return store.write(hash, bytes);
+    },
+    readWith: async (q: Queryable, hash: ContentHashParam) => {
+      const store = (await resolve()) as MaybeTransactional;
+      if (typeof store.readWith === 'function') return store.readWith(q, hash);
+      return store.read(hash);
+    },
+  } satisfies AssetByteStore & {
+    writeWith: (q: Queryable, h: ContentHashParam, b: Uint8Array) => Promise<void>;
+    readWith: (q: Queryable, h: ContentHashParam) => Promise<Uint8Array | null>;
+  };
   // The PostgreSQL byte column can never sign, and advertising the method
   // anyway would make resolveIndirect take its ownership query and blob-row
   // lock before declining, then repeat them in resolve -- on every cold GET.

@@ -969,12 +969,17 @@
     "pdfSizeLimit": "Supports PDF files up to 50MB",
     "courseMaterialSizeLimit": "Documents, slides, spreadsheets, images, and plain text — up to 50MB (accepted formats depend on the selected extractor)",
     "generateFailed": "Failed to generate classroom, please try again",
+    "serverGenButton": "Generate (server)",
+    "serverGenStarting": "Starting server generation…",
+    "serverGenRunning": "Generating on server…",
+    "serverGenHint": "Runs the whole pipeline on the server — safe to switch tabs or let the machine sleep, and the course opens in any browser.",
     "requirementPlaceholder": "Tell me anything you want to learn, e.g.\n\"Teach me Python from scratch in 30 minutes\"\n\"Explain Fourier Transform on the whiteboard\"\n\"How to play the board game Avalon\"",
     "requirementRequired": "Please enter course requirements",
     "fileTooLarge": "File too large. Please select a file smaller than 50MB",
     "courseMaterialCountLimit": "You can upload up to 5 course material files",
     "courseMaterialTotalSizeLimit": "Total course material size must be under 150MB",
-    "unsupportedCourseMaterial": "This format isn't supported by the current extractor. Switch the extractor or pick a different file."
+    "unsupportedCourseMaterial": "This format isn't supported by the current extractor. Switch the extractor or pick a different file.",
+    "serverGenExtracting": "Extracting course materials…"
   },
   "generation": {
     "pdfLoadFailed": "Failed to load PDF file, please try again",

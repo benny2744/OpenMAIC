@@ -28,6 +28,7 @@ import {
   Presentation,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
+import { startServerSideGeneration } from '@/lib/classroom/server-generate';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { createLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
@@ -116,6 +117,11 @@ function HomePage() {
   const showVocationalTestUi = shouldShowVocationalTestUi();
   const [form, setForm] = useState<FormState>(initialFormState);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [serverGen, setServerGen] = useState<{
+    running: boolean;
+    message?: string;
+    progress?: number;
+  }>({ running: false });
   const [settingsSection, setSettingsSection] = useState<
     import('@/lib/types/settings').SettingsSection | undefined
   >(undefined);
@@ -586,6 +592,86 @@ function HomePage() {
     }
   };
 
+  // Server-side generation (#structural-fix): submit the async job and
+  // immediately redirect to a durable job-status page. The pipeline runs
+  // entirely on the server, so the tab can be closed; the job page polls and
+  // forwards to /classroom/<id> when ready, and can be reopened anytime.
+  const handleGenerateServerSide = async () => {
+    if (!form.requirement.trim()) {
+      setError(t('upload.requirementRequired'));
+      return;
+    }
+    setError(null);
+    setServerGen({ running: true, message: t('upload.serverGenStarting'), progress: 0 });
+    try {
+      const settings = useSettingsStore.getState();
+      const enableTTS = settings.ttsProviderId !== 'browser-native-tts';
+
+      // Course materials: extract text (and image refs) via the same
+      // /api/extract-document route the browser path uses, then hand the
+      // parsed content to the server-side job. Extraction is a short one-shot
+      // request, so doing it here keeps the long scene generation sleep-proof.
+      let pdfContent: { text: string; images: string[] } | undefined;
+      if (form.courseMaterials.length > 0) {
+        setServerGen({ running: true, message: t('upload.serverGenExtracting'), progress: 0 });
+        const pdfProviderId = settings.pdfProviderId;
+        const providerCfg = settings.pdfProvidersConfig?.[settings.pdfProviderId];
+        const texts: string[] = [];
+        const images: string[] = [];
+        const orderedMaterials = [...form.courseMaterials].sort((a, b) => a.order - b.order);
+        for (const item of orderedMaterials) {
+          const parseFormData = new FormData();
+          parseFormData.append('file', item.file);
+          if (pdfProviderId) parseFormData.append('providerId', pdfProviderId);
+          if (providerCfg?.apiKey?.trim()) parseFormData.append('apiKey', providerCfg.apiKey);
+          if (providerCfg?.baseUrl?.trim()) parseFormData.append('baseUrl', providerCfg.baseUrl);
+          if (providerCfg?.accessKeyId?.trim())
+            parseFormData.append('accessKeyId', providerCfg.accessKeyId);
+          if (providerCfg?.accessKeySecret?.trim())
+            parseFormData.append('accessKeySecret', providerCfg.accessKeySecret);
+
+          const parseResponse = await fetch('/api/extract-document', {
+            method: 'POST',
+            body: parseFormData,
+          });
+          if (!parseResponse.ok) {
+            const errorData = await parseResponse.json().catch(() => ({}));
+            throw new Error(errorData.error || t('generation.courseMaterialParseFailed'));
+          }
+          const parseResult = await parseResponse.json();
+          if (!parseResult.success || !parseResult.data) {
+            throw new Error(t('generation.courseMaterialParseFailed'));
+          }
+          if (parseResult.data.text) {
+            texts.push(`# ${item.name}\n\n${parseResult.data.text}`);
+          }
+          const rawImages = parseResult.data.metadata?.pdfImages as
+            | { src?: string }[]
+            | undefined;
+          const srcs = rawImages
+            ? rawImages.map((img) => img.src).filter((s): s is string => Boolean(s))
+            : ((parseResult.data.images as string[] | undefined) ?? []);
+          images.push(...srcs);
+        }
+        pdfContent = { text: texts.join('\n\n'), images };
+        setServerGen({ running: true, message: t('upload.serverGenStarting'), progress: 0 });
+      }
+
+      const jobId = await startServerSideGeneration({
+        requirement: form.requirement,
+        ...(pdfContent ? { pdfContent } : {}),
+        enableWebSearch: form.webSearch || undefined,
+        enableTTS,
+        agentMode: 'generate',
+      });
+      router.push(`/classroom-job/${jobId}`);
+    } catch (err) {
+      setServerGen({ running: false });
+      log.error('Server-side generation failed to start:', err);
+      setError(err instanceof Error ? err.message : t('upload.generateFailed'));
+    }
+  };
+
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -829,6 +915,29 @@ function HomePage() {
                   });
                 }}
               />
+
+              {/* Server-side generation (robust to background tabs / sleep) */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleGenerateServerSide}
+                    disabled={!canGenerate || serverGen.running}
+                    className={cn(
+                      'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3 border',
+                      canGenerate && !serverGen.running
+                        ? 'border-violet-300/70 text-violet-700 dark:border-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/40 cursor-pointer'
+                        : 'border-muted text-muted-foreground/40 cursor-not-allowed',
+                    )}
+                  >
+                    <span className="text-xs font-medium">
+                      {serverGen.running
+                        ? serverGen.message || t('upload.serverGenRunning')
+                        : t('upload.serverGenButton')}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('upload.serverGenHint')}</TooltipContent>
+              </Tooltip>
 
               {/* Send button */}
               <button

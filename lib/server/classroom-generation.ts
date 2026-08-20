@@ -27,6 +27,7 @@ import { buildSearchQuery } from '@/lib/server/search-query-builder';
 import { formatSearchResultsAsContext, searchWeb } from '@/lib/web-search';
 import type { BaiduSubSources, WebSearchProviderId } from '@/lib/web-search/types';
 import { persistClassroom } from '@/lib/server/classroom-storage';
+import { saveClassroomToDocumentStore } from '@/lib/server/persist-document';
 import {
   generateMediaForClassroom,
   replaceMediaPlaceholders,
@@ -718,6 +719,18 @@ export async function generateClassroom(
   );
 
   log.info(`Classroom persisted: ${persisted.id}, URL: ${persisted.url}`);
+
+  // Mirror into the Postgres document store so the classroom is listable,
+  // loadable, and deletable through the persistence path the browser uses.
+  // Best-effort: the file-store classroom above is the authoritative
+  // transport, so a document-store failure must not fail the job.
+  if (process.env.DATABASE_URL?.trim()) {
+    try {
+      await saveClassroomToDocumentStore(stage, scenes);
+    } catch (err) {
+      log.warn('Failed to mirror classroom to document store (non-fatal):', err);
+    }
+  }
 
   await options.onProgress?.({
     step: 'completed',

@@ -1,0 +1,13 @@
+services:
+  openmaic:
+    # Disable the render-service wiring from the base compose (video-export profile is off).
+    environment:
+      - RENDER_SERVICE_URL=
+    networks:
+      - default
+      - litellm-net # reach litellm-postgres (DATABASE_URL host = litellm-postgres)
+
+networks:
+  litellm-net:
+    external: true
+    name: litellm_litellm-net

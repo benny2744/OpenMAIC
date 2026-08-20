@@ -604,6 +604,18 @@ async function performStageDeletion(stageId: string): Promise<void> {
             await store.deleteDocument(stageId);
             documentDeleted = true;
 
+            // Server-side generated classrooms are also mirrored to the
+            // file store (/api/classroom), which is outside the document
+            // store. Remove that copy too so a deleted classroom cannot be
+            // re-served from the file. Best-effort: 404 (no file) is fine.
+            try {
+              await fetch(`/api/classroom?id=${encodeURIComponent(stageId)}`, {
+                method: 'DELETE',
+              });
+            } catch (error) {
+              log.warn(`Failed to delete file-store classroom for stage ${stageId}:`, error);
+            }
+
             // Reclamation is intentionally after the authoritative document
             // delete. The prepared plan has already captured Dexie-only orphans.
             await executeStageAssetReclamation(assetPlan, null);

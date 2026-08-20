@@ -6,6 +6,7 @@ import {
   isValidClassroomId,
   persistClassroom,
   readClassroom,
+  deleteClassroom,
 } from '@/lib/server/classroom-storage';
 import { createLogger } from '@/lib/logger';
 
@@ -43,6 +44,42 @@ export async function POST(request: NextRequest) {
       API_ERROR_CODES.INTERNAL_ERROR,
       500,
       'Failed to store classroom',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const id = request.nextUrl.searchParams.get('id');
+
+    if (!id) {
+      return apiError(
+        API_ERROR_CODES.MISSING_REQUIRED_FIELD,
+        400,
+        'Missing required parameter: id',
+      );
+    }
+
+    if (!isValidClassroomId(id)) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid classroom id');
+    }
+
+    const deleted = await deleteClassroom(id);
+    if (!deleted) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
+    }
+
+    return apiSuccess({ deleted: true });
+  } catch (error) {
+    log.error(
+      `Classroom deletion failed [id=${request.nextUrl.searchParams.get('id') ?? 'unknown'}]:`,
+      error,
+    );
+    return apiError(
+      API_ERROR_CODES.INTERNAL_ERROR,
+      500,
+      'Failed to delete classroom',
       error instanceof Error ? error.message : String(error),
     );
   }

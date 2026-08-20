@@ -373,6 +373,25 @@ and
 Leave `NEXT_PUBLIC_PERSISTENCE` unset to retain the existing browser-only
 behavior.
 
+#### Self-hosting notes
+
+For reverse-proxy or public-host deployments, set `APP_ORIGIN` to the canonical
+HTTPS origin (e.g. `https://openmaic.ygslife.org`) in `.env.local`. Server-side
+generation bakes this origin into generated audio/media URLs; without it, remote
+browsers receive `http://localhost:3000/...` URLs they cannot resolve.
+
+Server-side generation (`/api/generate-classroom`) runs the full pipeline
+(outlines, scenes, media, TTS, persistence) asynchronously on the server. Submit
+a job, poll or visit the returned URL, and the browser is redirected to the
+finished classroom when done. This avoids tab-suspension failures on long
+ generations and supports PDF input: course materials are extracted client-side
+before the job is submitted.
+
+If your upstream model gateway is slow on heavy scene prompts (e.g. 5-minute
+`Headers Timeout Error`), use `MODEL_ROUTES` to route expensive stages such as
+`scene-content:slide` or `scene-content:interactive` to a faster model while
+keeping the default model for lighter work. See `.env.example` for the format.
+
 ### Optional: MP4 Video Export (Render Service)
 
 The "Export Video" menu builds a self-contained [Hyperframes](https://www.npmjs.com/package/@hyperframes/producer) project entirely in the browser. Turning that into an MP4 needs Chromium + FFmpeg on Node 22, so it runs in an isolated `render-service` container rather than the app.
