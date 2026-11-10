@@ -1,0 +1,18 @@
+services:
+  openmaic:
+    # Disable the render-service wiring from the base compose (video-export
+    # profile is off; an unset URL skips the /health probe).
+    environment:
+      - RENDER_SERVICE_URL=
+    # Model configuration (slots + provider authorization). Read once at
+    # startup; no secrets in the file, only ${VAR} references.
+    volumes:
+      - ./openmaic.yml:/app/openmaic.yml:ro
+    networks:
+      - default
+      - litellm-net # reach litellm-postgres (DATABASE_URL host = litellm-postgres) and litellm (OPENAI gateway)
+
+networks:
+  litellm-net:
+    external: true
+    name: litellm_litellm-net

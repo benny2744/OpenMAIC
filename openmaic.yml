@@ -1,0 +1,62 @@
+# openmaic.yml — model configuration for this deployment (migrated from the
+# legacy provider variables / DEFAULT_MODEL / MODEL_ROUTES during the
+# v1.4.2 upgrade, 2026-11-10).
+#
+# With this file present, slot resolution uses ONLY this file: the legacy
+# OPENAI_* / TTS_QWEN_* provider variables, DEFAULT_MODEL and MODEL_ROUTES
+# no longer apply. Secrets stay in .env.local and are referenced as ${VAR}.
+# The server reads this file once at startup; restart to apply changes.
+
+providers:
+  # Chat via the local LiteLLM gateway (was OPENAI_API_KEY + OPENAI_BASE_URL
+  # + OPENAI_MODELS). The preset is "openai"; baseUrl points it at LiteLLM.
+  openai:
+    preset: openai
+    baseUrl: http://litellm:4000/v1
+    apiKey: ${OPENAI_API_KEY}
+    # Authorization allowlist — refreshed 2026-11-11 against the gateway's
+    # current /v1/models (kimi + glm + step families). Catalogues and
+    # user-added workspace keys never grant additional server-managed models.
+    models:
+      - k3.1-pro
+      - k3.1-pro-cc
+      - k3.1-pro-highspeed
+      - glm-5.2
+      - glm-5.2-cc
+      - glm-5.3
+      - glm-5.3-cc
+      - glm-5.3-flash
+      - glm-5.3-flash-cc
+      - step-3.5-flash
+      - step-3.5-flash-2603
+      - step-3.7-flash
+      - step-5-preview
+
+  # Text to speech via Qwen TTS on DashScope (was TTS_QWEN_API_KEY +
+  # TTS_QWEN_BASE_URL; the preset's default baseUrl matches, so it is omitted).
+  # The allowlist carries the standard model plus the CosyVoice voice-clone
+  # target, as required since v1.4.0 (voice cloning without it returns 403).
+  qwen-tts:
+    preset: qwen-tts
+    apiKey: ${TTS_QWEN_API_KEY}
+    models: [qwen3-tts-flash, cosyvoice-v3.5-plus]
+
+slots:
+  # Default chat model for every chat slot without an assignment of its own
+  # (outline, agents, classroom chat, actions): glm-5.3-flash per the
+  # 2026-11-11 model refresh. Classroom chat and the workbench agent need
+  # tool calling; if the gateway refuses, pin them to glm-5.3-flash-cc.
+  llm: openai:glm-5.3-flash
+
+  # Slide/interactive scene content: k3.1-pro (successor of the removed
+  # kimi-for-coding), thinking off as before.
+  course.content.slide:
+    model: openai:k3.1-pro
+    thinking: { enabled: false }
+  course.content.interactive:
+    model: openai:k3.1-pro
+    thinking: { enabled: false }
+
+  # Narration and agent speech: the standard Qwen TTS model (voice cloning
+  # resolves through cosyvoice-v3.5-plus, authorized above).
+  tts: qwen-tts:qwen3-tts-flash
